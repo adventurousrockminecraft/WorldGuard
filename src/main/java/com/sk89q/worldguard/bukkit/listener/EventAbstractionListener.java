@@ -64,9 +64,8 @@ import org.bukkit.event.vehicle.VehicleDestroyEvent;
 import org.bukkit.event.world.StructureGrowEvent;
 import org.bukkit.inventory.InventoryHolder;
 import org.bukkit.inventory.ItemStack;
+import org.bukkit.material.*;
 import org.bukkit.material.Dispenser;
-import org.bukkit.material.MaterialData;
-import org.bukkit.material.SpawnEgg;
 import org.bukkit.projectiles.ProjectileSource;
 import org.bukkit.util.Vector;
 
@@ -243,18 +242,32 @@ public class EventAbstractionListener extends AbstractListener {
         Events.fireBulkEventToCancel(event, new BreakBlockEvent(event, create(entity), event.getLocation().getWorld(), event.blockList(), Material.AIR));
     }
 
+    @SuppressWarnings("deprecation")
     @EventHandler(ignoreCancelled = true)
     public void onBlockPistonRetract(BlockPistonRetractEvent event) {
         if (event.isSticky()) {
             EventDebounce.Entry entry = pistonRetractDebounce.getIfNotPresent(new BlockPistonRetractKey(event), event);
             if (entry != null) {
-                Cause cause = create(event.getBlock());
-                Events.fireToCancel(event, new BreakBlockEvent(event, cause, event.getRetractLocation(), Material.AIR));
-                Events.fireToCancel(event, new PlaceBlockEvent(event, cause, event.getBlock().getRelative(event.getDirection())));
+                Block piston = event.getBlock();
+                Cause cause = create(piston);
+
+                BlockFace direction = event.getDirection();
+
+                ArrayList<Block> blocks = new ArrayList<Block>(event.getBlocks());
+                int originalSize = blocks.size();
+                Events.fireBulkEventToCancel(event, new BreakBlockEvent(event, cause, event.getBlock().getWorld(), blocks, Material.AIR));
+                if (originalSize != blocks.size()) {
+                    event.setCancelled(true);
+                }
+                for (Block b : event.getBlocks()) {
+                    Location loc = b.getRelative(direction).getLocation();
+                    Events.fireToCancel(event, new PlaceBlockEvent(event, cause, loc, b.getType()));
+                }
+
                 entry.setCancelled(event.isCancelled());
 
                 if (event.isCancelled()) {
-                    playDenyEffect(event.getBlock().getLocation().add(0.5, 1, 0.5));
+                    playDenyEffect(piston.getLocation().add(0.5, 1, 0.5));
                 }
             }
         }
@@ -264,11 +277,12 @@ public class EventAbstractionListener extends AbstractListener {
     public void onBlockPistonExtend(BlockPistonExtendEvent event) {
         EventDebounce.Entry entry = pistonExtendDebounce.getIfNotPresent(new BlockPistonExtendKey(event), event);
         if (entry != null) {
-            // A hack for now
             List<Block> blocks = new ArrayList<Block>(event.getBlocks());
-            Block lastBlock = event.getBlock().getRelative(event.getDirection(), event.getLength() + 1);
-            blocks.add(lastBlock);
             int originalLength = blocks.size();
+            BlockFace dir = event.getDirection();
+            for (int i = 0; i < blocks.size(); i++) {
+                blocks.set(i, blocks.get(i).getRelative(dir));
+            }
             Events.fireBulkEventToCancel(event, new PlaceBlockEvent(event, create(event.getBlock()), event.getBlock().getWorld(), blocks, Material.STONE));
             if (blocks.size() != originalLength) {
                 event.setCancelled(true);
@@ -430,7 +444,9 @@ public class EventAbstractionListener extends AbstractListener {
         Events.fireToCancel(event, new PlaceBlockEvent(event, create(player), blockAffected.getLocation(), blockMaterial).setAllowed(allowed));
         Events.fireToCancel(event, new UseItemEvent(event, create(player), player.getWorld(), item).setAllowed(allowed));
 
-        playDenyEffect(event.getPlayer(), blockAffected.getLocation().add(0.5, 0.5, 0.5));
+        if (event.isCancelled()) {
+            playDenyEffect(event.getPlayer(), blockAffected.getLocation().add(0.5, 0.5, 0.5));
+        }
     }
 
     @EventHandler(ignoreCancelled = true)
@@ -440,7 +456,7 @@ public class EventAbstractionListener extends AbstractListener {
         boolean allowed = false;
 
         // Milk buckets can't be emptied as of writing
-        if (event.getBucket() == Material.MILK_BUCKET) {
+        if (event.getItemStack().getType() == Material.MILK_BUCKET) {
             allowed = true;
         }
 
@@ -448,7 +464,9 @@ public class EventAbstractionListener extends AbstractListener {
         Events.fireToCancel(event, new BreakBlockEvent(event, create(player), blockAffected).setAllowed(allowed));
         Events.fireToCancel(event, new UseItemEvent(event, create(player), player.getWorld(), item).setAllowed(allowed));
 
-        playDenyEffect(event.getPlayer(), blockAffected.getLocation().add(0.5, 1, 0.5));
+        if (event.isCancelled()) {
+            playDenyEffect(event.getPlayer(), blockAffected.getLocation().add(0.5, 0.5, 0.5));
+        }
     }
 
     // TODO: Handle EntityPortalEnterEvent
@@ -689,7 +707,7 @@ public class EventAbstractionListener extends AbstractListener {
     @EventHandler(ignoreCancelled = true)
     public void onVehicleDamage(VehicleDamageEvent event) {
         Entity attacker = event.getAttacker();
-        Events.fireToCancel(event, new DestroyEntityEvent(event, create(attacker), event.getVehicle()));
+        Events.fireToCancel(event, new DamageEntityEvent(event, create(attacker), event.getVehicle()));
     }
 
     @EventHandler(ignoreCancelled = true)
@@ -917,6 +935,12 @@ public class EventAbstractionListener extends AbstractListener {
         @EventHandler(ignoreCancelled = true)
         public void onPlayerInteractAtEntity(PlayerInteractAtEntityEvent event){
             onPlayerInteractEntity(event);
+        }
+
+        @EventHandler(ignoreCancelled = true)
+        public void onBlockExplode(BlockExplodeEvent event) {
+            Events.fireBulkEventToCancel(event, new BreakBlockEvent(event, create(event.getBlock()),
+                    event.getBlock().getLocation().getWorld(), event.blockList(), Material.AIR));
         }
     }
 
